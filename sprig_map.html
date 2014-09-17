@@ -1,36 +1,320 @@
 
+<!-- Kenzan Boo  - Map of Sprig Hubs and Orders
 
+This is a draft of the an orders map.
+
+Not fully optimized for performance with large data sets. 
+
+Mocked out server call with a static json file.
+-->
 <!DOCTYPE html>
 <html>
   <head>
     <meta name="viewport" content="initial-scale=1.0, user-scalable=no" />
+    <link rel="stylesheet" href="https://maxcdn.bootstrapcdn.com/bootstrap/3.2.0/css/bootstrap.min.css">
     <style type="text/css">
       html { height: 100% }
       body { height: 100%; margin: 0; padding: 0 }
-      #map-canvas { height: 100% }
-    </style>
-    <script>
-    	var kenzan_google_api_key = "AIzaSyBNsFeFXpIUouweN-IfCgs8HJ2zDtSwBi0";
-    </script>
-    <script type="text/javascript"
-      src="https://maps.googleapis.com/maps/api/js?key=" + kenzan_google_api_key>
-    </script>
-    <script type="text/javascript">
-      function initialize() {
-        var mapOptions = {
-          center: new google.maps.LatLng(-34.397, 150.644),
-          zoom: 8
-        };
-        var map = new google.maps.Map(document.getElementById("map-canvas"),
-            mapOptions);
+      .map-container {height: 100%; background: grey;}
+      .filters-container {
+        width: 200px;
+        padding-left:5px;
+        padding-right: 2px;
+        padding-bottom:5px;
+        height: 100%;
+        background: white;
+        position: fixed;
+        overflow-y: auto; 
+      }  
+      .filters-container .hubs-selector {
+        font-weight: bold;
+        height: 20ex;
+        width: 2em;
+        font-size: 16px;
+        margin-left: 2em;
       }
-      google.maps.event.addDomListener(window, 'load', initialize);
+      .filters-container .total-orders-selected-count {
+        font-weight: bold;
+        color: green;
+        height: 3ex;
+      }
+      .map {
+        height: 100%;
+        margin-left: 200px;
+      }
+      h3 {
+        font-size: 1.3em;
+        margin-top: 1em;
+        text-decoration: underline;
+        display: block;
+      }
+      .start-date, .end-date {
+        width: 185px;
+        margin: 0px;
+      }
+      #map-canvas { height: 100%; }
+      
+    </style>
+
+    <script src="https://ajax.googleapis.com/ajax/libs/jquery/2.1.1/jquery.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/underscore.js/1.6.0/underscore-min.js"></script>
+    <script type="text/javascript"
+      var kenzan_google_api_key = "AIzaSyBNsFeFXpIUouweN-IfCgs8HJ2zDtSwBi0";
+        src="https://maps.googleapis.com/maps/api/js?libraries=visualization&key=" + kenzan_google_api_key>
+    </script>
+
+
+
+    <script>
+    	//Temp data storage
+    	var sampleData = {}; //globally scoped for test
+    	//not sure why theres no Hub 3?
+    	sampleData.hubs = [
+    		{"name" : "1", "lat" : 37.774508, "lng" : -122.401372},
+    		{"name" : "2", "lat" : 37.74862, "lng" : -122.424929},
+    		{"name" : "4", "lat" : 37.800897, "lng" : -122.427852},
+    		{"name" : "5", "lat" : 37.77176, "lng" : -122.43312},
+    		{"name" : "6", "lat" : 37.793567, "lng" : -122.401121},
+    		{"name" : "7", "lat" : 37.78147, "lng" : -122.45586},
+    		{"name" : "8", "lat" : 37.789886, "lng" : -122.420546},
+    		{"name" : "9", "lat" : 37.778126, "lng" : -122.393688}
+        ];
+      sampleData.ordersUrl = "https://dl.dropboxusercontent.com/u/442899/json/orders.json";
+      $.getJSON(sampleData.ordersUrl, function(data) {
+               sampleData.orders = data;
+      });
+    </script>
+
+    
+
+    <script type="text/javascript">
+    (function(){
+
+      var sprigMap = function(){        
+        var UI = {
+          totalOrdersCount : '.total-orders-selected-count',
+          filter : ".filter-by",
+          startDate : ".start-date",
+          endDate :  ".end-date",
+          startTime :  ".start-time",
+          endTime :  ".end-time",
+          hubsSelector : ".hubs-selector",
+          hubsSelectorOptions : ".hubs-selector .options",
+          showAll : ".show-all-orders",
+          hubImageUrlBase : "https://dl.dropboxusercontent.com/u/442899/img/sprig/leaf-bowl-",
+          hubImageType : ".png",
+          heatmapGradient : ['rgba(0, 255, 255, 0)','rgba(0, 255, 255, 1)',
+          'rgba(0, 191, 255, 1)','rgba(0, 127, 255, 1)','rgba(0, 63, 255, 1)',
+          'rgba(0, 0, 255, 1)','rgba(0, 0, 223, 1)','rgba(0, 0, 191, 1)',
+          'rgba(0, 0, 159, 1)','rgba(0, 0, 127, 1)','rgba(63, 0, 91, 1)',
+          'rgba(127, 0, 63, 1)','rgba(191, 0, 31, 1)','rgba(255, 0, 0, 1)'
+          ]
+        };
+        var map, heatmap, pointArray;
+
+        var init = function() {
+          var hubs = getHubs();
+          var mapCenter = new google.maps.LatLng(hubs[0].lat, hubs[0].lng)
+          var mapOptions = {
+            center: mapCenter,
+            zoom: 13
+          };
+          map = new google.maps.Map(document.getElementById("map-canvas"), mapOptions);
+          initHtmlEvents();
+          addHubsToMap(hubs, map); 
+          getFilteredOrders(addOrdersHeatMap, null);
+        }
+        
+        /*Init click handlers for filters
+        */
+        function initHtmlEvents() {
+          $( UI.hubsSelector )
+            .change(function () {              
+              getFilteredOrders(addOrdersHeatMap, getFilters());
+          });
+          $( UI.showAll )
+            .click(function() {
+              getFilteredOrders(addOrdersHeatMap, null);
+              $(UI.hubsSelectorOptions).attr("selected", "selected");
+            });
+          $( UI.filter )
+            .change(function() {
+              getFilteredOrders(addOrdersHeatMap, getFilters());
+            });              
+        }
+
+        /* get the filtersOptions from the ui el selected
+        * filterOptions are passed into the getOrders to filter the orderes
+        */
+        function getFilters () {
+          var filterOptions = {};
+          var selectedHubs = [];
+          $( ".hubs-selector option:selected" ).each(function() {
+            selectedHubs.push($( this ).text());
+          });
+          filterOptions.hubs = selectedHubs;
+          filterOptions.startDate = $(UI.startDate)[0].value;
+          filterOptions.endDate = $(UI.endDate)[0].value;
+          filterOptions.startTime = $(UI.startTime)[0].value;
+          filterOptions.endTime = $(UI.endTime)[0].value;
+          return filterOptions;
+        }
+
+        /* Get the list of hubs
+         * placeholder. To place in real info from server.
+         */
+        function getHubs() { 
+          return sampleData.hubs;
+        }
+
+        /* Mock call to server side service to get orders
+         * cb = callback to display the orders when we have the data
+         */
+        function getFilteredOrders(cb, filterOptions) {
+          if (sampleData.orders) {
+            cb(filter(sampleData.orders, filterOptions));
+          } else {
+            $.getJSON(sampleData.ordersUrl, function(data) {
+                sampleData.orders = data;
+                cb(filter(data, filterOptions));
+            });
+          }
+        }
+
+        /*client side filter for excercise. 
+        * should be done on server side with large data sets
+        * filterOptions contains an object with fitler options
+        */
+        function filter(ordersData, filterOptions) {
+          if (!filterOptions) return ordersData;
+
+          if (filterOptions.hubs !== undefined) {
+            ordersData = _.filter(ordersData, function(order) {
+              var hubNum = order.hub_id.toString();
+              return filterOptions.hubs.indexOf(hubNum) >= 0;
+            });
+          }
+          if (filterOptions.startDate !== undefined) {
+            ordersData = _.filter(ordersData, function(order) {
+              var createdDate = order.created_at.split(" ")[0];
+              return createdDate >= filterOptions.startDate;
+            });
+          }
+          if (filterOptions.endDate !== undefined) {
+            ordersData = _.filter(ordersData, function(order) {
+              var createdDate = order.created_at.split(" ")[0];
+              return createdDate <= filterOptions.endDate;
+            });
+          }
+          if (filterOptions.startTime !== undefined) {
+            ordersData = _.filter(ordersData, function(order) {
+              var createdTime = order.created_at.split(" ")[1];
+              return createdTime >= filterOptions.startTime;
+            });
+          }
+          if (filterOptions.endTime !== undefined) {
+            ordersData = _.filter(ordersData, function(order) {
+              var createdTime = order.created_at.split(" ")[1];
+              return createdTime <= filterOptions.endTime;
+            });
+          }
+          return ordersData;
+        }
+
+        /*updates the number on top indicating total orders with filters
+        */
+        function updateTotalOrdersDisplay(orders) {
+          $(UI.totalOrdersCount).html(orders.length);
+        }
+
+        /*
+        *adds orders to map after we get it from server
+        */
+        function addOrdersHeatMap(orders){
+          updateTotalOrdersDisplay(orders);          
+          //TODO, put all these on the map
+          var ordersMapData = new Array(orders.length);
+          _.each(orders, function(order) {
+            var orderLatLng = new google.maps.LatLng(order.latitude, order.longitude);
+            ordersMapData.push(orderLatLng);
+          });
+          pointArray = new google.maps.MVCArray(ordersMapData);
+          if (heatmap) heatmap.setMap(null);
+          heatmap = new google.maps.visualization.HeatmapLayer({
+            data: pointArray
+          });
+          heatmap.setMap(map);
+          heatmap.set('gradient', UI.heatmapGradient);
+
+        }
+
+        /*add hubs to map using static data. Places individual markers on map
+        */
+        function addHubsToMap(hubs, map) {
+          _.each(hubs, addHubToMap);
+          function addHubToMap(hub){   
+            var hubNum = hub.name;
+            var hubImage = UI.hubImageUrlBase + hubNum + UI.hubImageType;      
+            var hubLatLng = new google.maps.LatLng(hub.lat, hub.lng)
+            var marker = new google.maps.Marker({ position: hubLatLng,
+              title: hub.name, icon: hubImage });       
+            // To add the marker to the map, call setMap();
+            marker.setMap(map);
+          }          
+        }
+        
+        return {init: init};                            
+      }();    
+
+      $( document ).ready(function(){
+        sprigMap.init();
+      });
+    })();
+      
     </script>
 
 
 
   </head>
   <body>
-    <div id="map-canvas"/>
+    <div class="map-container">
+      <div class="filters-container">
+        <h3> Number of Orders Selected</h3>
+        <p class="total-orders-selected-count"></p>
+        <h3>Show all orders</h3>
+        <button class="show-all-orders">Show all</button>
+        <h3>Filter Orders By Hubs </h3>
+        Hold 'cmd' or 'ctrl' to select multiple<br>
+        <select class="hubs-selector" multiple>
+          <option selected="selected" value="1">1</option>
+          <option selected="selected" value="2">2</option>
+          <option selected="selected" value="4">4</option>
+          <option selected="selected" value="5">5</option>
+          <option selected="selected" value="6">6</option>
+          <option selected="selected" value="7">7</option>
+          <option selected="selected" value="8">8</option>
+          <option selected="selected" value="9">9</option>
+        </select>          
+
+        <h3>Filter Orders By Created Date</h3>
+        <!-- preset values are based off of sample data for excercise-->
+        <strong>Start Date</strong><br>
+        <input type="date" class="filter-by start-date" placeholder="1989-01-19" value="2014-03-04"><br>
+        <strong>End Date</strong><br>
+        <input type="date" class="filter-by end-date" placeholder="1989-01-19" value="2014-04-01"><br>
+        <p>Sample Data only contains orders from Mar-04 to Apr-01</p>
+
+        <h3>Filter Orders By Created Time Of Day</h3>
+        <!-- preset values are based off of sample data for excercise-->
+        <strong>Start Time</strong><br>
+        <input type="time" class="filter-by start-time" value="00:00"><br>
+        <strong>End Time</strong><br>
+        <input type="time" class="filter-by end-time" value="23:59"><br>
+        <p>Sample Data only contains orders from 12:00am to 06:00am</p>  
+      </div>
+      <div class="map">
+        <div id="map-canvas"/>
+      </div>  
+    </div>
   </body>
 </html>
